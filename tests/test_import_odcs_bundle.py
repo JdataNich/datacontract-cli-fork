@@ -56,3 +56,11 @@ def test_reference_without_matching_files_fails(tmp_path):
 def test_duplicate_schema_names_fail():
     with pytest.raises(DataContractException, match="orders"):
         DataContract.import_from_source("odcs-bundle", BASE, schemas="./fixtures/odcs_bundle/schemas")
+
+
+def test_base_file_that_is_not_a_data_contract_fails(tmp_path):
+    base = tmp_path / "base.yaml"
+    base.write_text("kind: DataProduct\n")
+
+    with pytest.raises(DataContractException, match="kind: DataContract"):
+        DataContract.import_from_source("odcs-bundle", str(base))

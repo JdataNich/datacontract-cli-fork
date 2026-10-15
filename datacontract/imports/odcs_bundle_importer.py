@@ -5,7 +5,6 @@ import yaml
 from open_data_contract_standard.model import OpenDataContractStandard
 
 from datacontract.imports.importer import Importer
-from datacontract.imports.odcs_importer import parse_odcs
 from datacontract.model.exceptions import DataContractException
 
 
@@ -23,8 +22,8 @@ def import_odcs_bundle(source: str, schemas_dir: str | None = None) -> OpenDataC
     """
     base_path = Path(source)
     base = _load_yaml(base_path)
-    if not isinstance(base, dict):
-        _fail(f"The base file {base_path} is not a YAML mapping.")
+    if not isinstance(base, dict) or base.get("kind") != "DataContract":
+        _fail(f"The base file {base_path} is not an ODCS data contract with `kind: DataContract`.")
 
     schemas = []
     for entry in base.get("schema") or []:
@@ -57,7 +56,7 @@ def import_odcs_bundle(source: str, schemas_dir: str | None = None) -> OpenDataC
 
     if schemas or "schema" in base:
         base["schema"] = schemas
-    return parse_odcs(base)
+    return OpenDataContractStandard.model_validate(base)
 
 
 def _load_schemas(file: Path) -> list[dict]:

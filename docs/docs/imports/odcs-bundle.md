@@ -60,7 +60,7 @@ datacontract import odcs-bundle --source base.odcs.yaml --schemas schemas/ --out
 - A `$ref` is a glob, relative to the base file; `**` matches nested directories. Files are taken in alphabetical order, and a `$ref` that matches no file fails the import.
 - A schema file holds one schema object, a list of them, or a `schema:` list like a contract.
 - Each schema name may occur once across the base file and all schema files.
-- The assembled contract is validated as ODCS v3, like [`import odcs`](./odcs.md).
+- The base file must have `kind: DataContract`, and the assembled contract is validated against the ODCS model.
 - The base file and the schema files are read from the local file system.
 
 All options: **[`datacontract import odcs-bundle`](../commands/import/odcs-bundle.md)**.
