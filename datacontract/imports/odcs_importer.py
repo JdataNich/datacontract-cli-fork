@@ -23,7 +23,10 @@ def import_odcs(source: str, config=None) -> OpenDataContractStandard:
             engine="datacontract-cli",
             original_exception=e,
         )
+    return parse_odcs(odcs_yaml)
 
+
+def parse_odcs(odcs_yaml: dict) -> OpenDataContractStandard:
     odcs_kind = odcs_yaml.get("kind")
     odcs_api_version = odcs_yaml.get("apiVersion")
 

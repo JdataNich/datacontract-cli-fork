@@ -377,6 +377,41 @@ def import_odcs(
 
 
 @import_app.command(
+    name="odcs-bundle",
+    epilog="Example: datacontract import odcs-bundle --source base.odcs.yaml --schemas schemas/ "
+    "--output datacontract.yaml",
+)
+def import_odcs_bundle(
+    source: Annotated[
+        Optional[str],
+        typer.Option(
+            help="Path to the base ODCS file with everything but the schemas. "
+            "Its `schema` list may reference schema files with `- $ref: schemas/*.yaml`."
+        ),
+    ] = None,
+    schemas: Annotated[
+        Optional[str],
+        typer.Option(help="Directory whose .yaml and .yml schema files are appended to the contract."),
+    ] = None,
+    output: output_option = None,
+    owner: owner_option = None,
+    id: id_option = None,
+    debug: debug_option = None,
+):
+    """Assemble a data contract from a base ODCS file and separate schema files."""
+    enable_debug_logging(debug)
+    result = DataContract.import_from_source(
+        config=cli_config(),
+        format="odcs-bundle",
+        source=source,
+        schemas=schemas,
+        owner=owner,
+        id=id,
+    )
+    _write_result(result, output)
+
+
+@import_app.command(
     name="parquet",
     epilog="Example: datacontract import parquet --source data.parquet --output datacontract.yaml",
 )
