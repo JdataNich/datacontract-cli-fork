@@ -1,0 +1,8 @@
+name: orders
+physicalType: table
+properties:
+  - name: order_id
+    logicalType: string
+    primaryKey: true
+  - name: order_total
+    logicalType: integer

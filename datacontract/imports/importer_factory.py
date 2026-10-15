@@ -72,6 +72,11 @@ importer_factory.register_lazy_importer(
     class_name="OdcsImporter",
 )
 importer_factory.register_lazy_importer(
+    name=ImportFormat.odcs_bundle,
+    module_path="datacontract.imports.odcs_bundle_importer",
+    class_name="OdcsBundleImporter",
+)
+importer_factory.register_lazy_importer(
     name=ImportFormat.sql,
     module_path="datacontract.imports.sql_importer",
     class_name="SqlImporter",
