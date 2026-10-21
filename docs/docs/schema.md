@@ -226,6 +226,48 @@ These are common sources of confusion. They are valid ODCS and appear in exports
 
 Anything beyond this list that you want verified belongs in a [quality rule](./quality-rules/index.md) — a `type: library` metric for the common cases, or `type: sql` for arbitrary expressions.
 
+## Split the schema across files
+
+A contract with many schemas can keep each one in its own file. An entry of the `schema` list that holds only `$ref: <file or glob>` is replaced by the schemas in the matching files whenever the contract is read, so `lint`, `test`, `export`, `changelog`, `breaking`, and every other command work on the split contract directly:
+
+```yaml
+# datacontract.odcs.yaml
+apiVersion: v3.1.0
+kind: DataContract
+id: orders
+version: 1.0.0
+status: active
+schema:
+  - $ref: schemas/*.yaml         # every schema file in schemas/, in path order
+  - $ref: shared/customers.yaml  # or a single file
+  - name: audit_log              # inline schemas keep their place
+    properties:
+      - name: event_id
+        logicalType: string
+```
+
+```yaml
+# schemas/orders.yaml
+name: orders
+physicalType: table
+properties:
+  - name: order_id
+    logicalType: string
+    primaryKey: true
+```
+
+- Paths and globs are relative to the contract file, `**` matches nested directories, and a glob never matches the contract itself. `*.yaml` does not match `.yml` files; add a second entry for those.
+- A schema file holds one schema object or a list of them, and cannot reference further files.
+- A reference entry holds `$ref` and nothing else. A reference that matches no file fails, and so does a schema name that occurs twice in the assembled contract.
+- A relative file link in the `authoritativeDefinitions` of a schema file is relative to that file, like any other [file reference](./semantics.md).
+- References resolve only in a contract read from a local file, not in one read from a URL, sent to the [API](./api.md), or tested from the [editor](./editor.md).
+
+ODCS itself has no reference mechanism, so editors that validate the contract against the ODCS JSON Schema report the `$ref` entries, and other ODCS tools cannot read the split files. Export the assembled contract as a single file for them:
+
+```bash
+datacontract export odcs datacontract.odcs.yaml --no-inline-references --output datacontract.bundled.odcs.yaml
+```
+
 ## Next steps
 
 - Add rules that go beyond structure: **[Define your Quality Rules](./quality-rules/index.md)**.

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `$ref` entries in a contract's `schema` list, to keep each schema in its own file
+
 ## [1.2.6] - 2026-10-13
 
 ### Changed
