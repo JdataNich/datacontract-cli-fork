@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- A contract's `schema` list can hold `$ref` entries that load schemas from other files
+
 ## [1.2.6] - 2026-10-13
 
 ### Changed

@@ -2,6 +2,7 @@ import yaml
 from open_data_contract_standard.model import OpenDataContractStandard
 
 from datacontract.imports.importer import Importer
+from datacontract.lint.resolve import expand_schema_references
 from datacontract.lint.resources import read_resource
 from datacontract.model.exceptions import DataContractException
 
@@ -24,6 +25,7 @@ def import_odcs(source: str, config=None) -> OpenDataContractStandard:
             original_exception=e,
         )
 
+    odcs_yaml = expand_schema_references(odcs_yaml, source)
     odcs_kind = odcs_yaml.get("kind")
     odcs_api_version = odcs_yaml.get("apiVersion")
 

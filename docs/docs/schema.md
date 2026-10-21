@@ -226,6 +226,53 @@ These are common sources of confusion. They are valid ODCS and appear in exports
 
 Anything beyond this list that you want verified belongs in a [quality rule](./quality-rules/index.md) — a `type: library` metric for the common cases, or `type: sql` for arbitrary expressions.
 
+## Split the schema across files
+
+A contract with many schemas can keep each one in its own file. An entry of the `schema` list that holds only `$ref: <file or glob>` is replaced by the schemas in the matching files whenever the contract is read, so `lint`, `test`, `export`, `changelog`, `breaking`, and the other commands work on the split contract directly:
+
+```yaml
+# datacontract.odcs.yaml
+apiVersion: v3.1.0
+kind: DataContract
+id: orders
+version: 1.0.0
+status: active
+schema:
+  - $ref: schemas/*.yaml   # every schema file in schemas/, in path order
+  - name: audit_log        # inline schemas keep their place
+    properties:
+      - name: event_id
+        logicalType: string
+```
+
+```yaml
+# schemas/orders.yaml
+name: orders
+physicalType: table
+properties:
+  - name: order_id
+    logicalType: string
+    primaryKey: true
+```
+
+:::caution
+Schema references are a datacontract-cli extension, not part of ODCS, and may change once ODCS adopts a way to reuse definitions across files ([RFC-0032](https://github.com/bitol-io/tsc/blob/main/rfcs/0032-imports.md)). Editors that validate a contract against the ODCS JSON Schema report the `$ref` entries, other ODCS tools cannot read the split files, and `lint` warns about them.
+:::
+
+- A reference names a single file or a glob, relative to the contract file. `**` matches nested directories, a glob never matches the contract itself, and `*.yaml` does not match `.yml` files; add a second entry for those.
+- A schema file holds one schema object or a list of them, and holds no `$ref` entries of its own.
+- A reference entry holds `$ref` and nothing else. A reference that matches no file fails, and so does a schema from a schema file whose name occurs twice in the contract.
+- A relative file link in the `authoritativeDefinitions` of a schema file is relative to that file, like any other [file reference](./semantics.md).
+- References resolve only in a contract read from a local file, not in one read from a URL, sent to the [API](./api.md), or tested from the [editor](./editor.md).
+
+To share the contract with other ODCS tools, export it as one file:
+
+```bash
+datacontract export odcs datacontract.odcs.yaml --no-inline-references --output dist/orders.yaml
+```
+
+The export is a full copy of the contract, with the same `id` and `version`, so keep it out of the directories that `dbt sync` and the contract's own globs scan, and do not name it `*.odcs.yaml`. Relative file links in it stay relative to the source contract.
+
 ## Next steps
 
 - Add rules that go beyond structure: **[Define your Quality Rules](./quality-rules/index.md)**.
