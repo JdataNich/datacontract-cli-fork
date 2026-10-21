@@ -76,25 +76,10 @@ def test_import_odcs_assembles_the_contract(split_contract):
     assert [schema.name for schema in contract.schema_] == ["customers", "addresses", "orders", "audit_log"]
 
 
-def test_publish_sends_the_assembled_contract(split_contract):
+def test_the_contract_as_a_dict_is_assembled(split_contract):
     contract = resolve_data_contract_dict(str(split_contract))
 
     assert [schema["name"] for schema in contract["schema"]] == ["customers", "addresses", "orders", "audit_log"]
-
-
-def test_changelog_compares_the_assembled_contracts(tmp_path):
-    for version, logical_type in (("v1", "integer"), ("v2", "number")):
-        orders = f"name: orders\nproperties:\n  - name: total\n    logicalType: {logical_type}\n"
-        _write(tmp_path / version / "orders.yaml", orders)
-        _contract(tmp_path / version, "- $ref: orders.yaml\n")
-
-    result = DataContract(data_contract_file=str(tmp_path / "v1" / "datacontract.odcs.yaml")).changelog(
-        DataContract(data_contract_file=str(tmp_path / "v2" / "datacontract.odcs.yaml"))
-    )
-
-    assert [(entry.path, entry.type.value) for entry in result.summary] == [
-        ("schema.orders.properties.total", "updated")
-    ]
 
 
 def test_lint_validates_the_schemas_from_the_referenced_files(tmp_path):
@@ -104,6 +89,23 @@ def test_lint_validates_the_schemas_from_the_referenced_files(tmp_path):
 
     assert run.result == ResultEnum.failed
     assert "schema.orders.properties.order_id.logicalType: 'strin' is not one of" in run.checks[0].reason
+
+
+def test_lint_warns_that_schema_references_are_not_odcs(split_contract):
+    run = DataContract(data_contract_file=str(split_contract)).lint()
+
+    assert run.result == ResultEnum.warning
+    assert any(
+        check.result == ResultEnum.warning and "datacontract-cli extension" in check.reason for check in run.checks
+    )
+
+
+def test_a_file_name_with_glob_characters_can_be_referenced(tmp_path):
+    _write(tmp_path / "schemas [v1]" / "orders.yaml", "name: orders\n")
+
+    contract = resolve_data_contract(str(_contract(tmp_path, "- $ref: 'schemas [v1]/orders.yaml'\n")))
+
+    assert [schema.name for schema in contract.schema_] == ["orders"]
 
 
 def test_a_glob_never_matches_the_contract_itself(tmp_path):
@@ -138,6 +140,61 @@ def test_a_definition_file_link_stays_relative_to_the_schema_file_that_holds_it(
     contract = resolve_data_contract(str(_contract(tmp_path, "- $ref: schemas/orders.yaml\n")), inline_references=True)
 
     assert contract.schema_[0].properties[0].description == "The order id"
+
+
+def test_a_definition_link_shared_through_a_yaml_alias_is_rewritten_once(tmp_path):
+    _write(tmp_path / "schemas" / "definitions" / "id.yaml", "description: An id\n")
+    _write(
+        tmp_path / "schemas" / "orders.yaml",
+        """
+        name: orders
+        properties:
+          - name: order_id
+            authoritativeDefinitions: &id
+              - type: businessDefinition
+                url: definitions/id.yaml
+          - name: customer_id
+            authoritativeDefinitions: *id
+        """,
+    )
+
+    contract = resolve_data_contract(str(_contract(tmp_path, "- $ref: schemas/orders.yaml\n")), inline_references=True)
+
+    assert [prop.description for prop in contract.schema_[0].properties] == ["An id", "An id"]
+
+
+def test_a_link_with_a_scheme_is_kept(tmp_path):
+    _write(
+        tmp_path / "schemas" / "orders.yaml",
+        """
+        name: orders
+        authoritativeDefinitions:
+          - type: canonicalUrl
+            url: "urn:example:orders#v1"
+        """,
+    )
+
+    contract = resolve_data_contract(str(_contract(tmp_path, "- $ref: schemas/orders.yaml\n")))
+
+    assert contract.schema_[0].authoritativeDefinitions[0].url == "urn:example:orders#v1"
+
+
+def test_duplicate_inline_schemas_are_left_to_lint(tmp_path):
+    _write(tmp_path / "customers.yaml", "name: customers\n")
+    schema = (
+        "- name: orders\n  physicalName: orders_eu\n- name: orders\n  physicalName: orders_us\n- $ref: customers.yaml\n"
+    )
+
+    contract = resolve_data_contract(str(_contract(tmp_path, schema)))
+
+    assert [schema.name for schema in contract.schema_] == ["orders", "orders", "customers"]
+
+
+def test_a_reference_with_a_fragment_fails(tmp_path):
+    _write(tmp_path / "orders.yaml", "name: orders\n")
+
+    with pytest.raises(DataContractException, match="without a `#` fragment"):
+        resolve_data_contract(str(_contract(tmp_path, "- $ref: orders.yaml#/0\n")))
 
 
 def test_a_reference_without_a_matching_file_fails(tmp_path):

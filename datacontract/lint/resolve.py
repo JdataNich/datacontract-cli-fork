@@ -780,7 +780,9 @@ def _resolve_data_contract_from_str(
 
     if is_open_data_contract_standard(yaml_dict):
         logger.info("Importing ODCS v3")
-        yaml_dict = expand_schema_references(yaml_dict, base_location)
+        expanded = expand_schema_references(yaml_dict, base_location)
+        has_schema_references = expanded is not yaml_dict
+        yaml_dict = expanded
         # When a custom JSON schema is provided, treat it as the source of
         # truth and accept extra top-level fields the standard ODCS Pydantic
         # class would reject.
@@ -818,6 +820,17 @@ def _resolve_data_contract_from_str(
                 base_location=base_location,
                 visited=_initial_visited(base_location),
                 configured_host_only=configured_host_only,
+            )
+        if has_schema_references:
+            warnings.append(
+                DataContractException(
+                    type="lint",
+                    result=ResultEnum.warning,
+                    name="Resolve schema references",
+                    reason="The `$ref` entries in the schema list are a datacontract-cli extension, so the file as "
+                    "written is not valid ODCS. `datacontract export odcs` writes the assembled contract as one file.",
+                    engine="datacontract-cli",
+                )
             )
         return odcs, schema_version, warnings
 
@@ -858,6 +871,7 @@ def expand_schema_references(yaml_dict, base_location: str | None):
     and never matches the contract itself. A matched file holds one schema object or a list of them,
     and cannot reference further files, so references cannot form a cycle. A relative file link in its
     `authoritativeDefinitions` is relative to that file, and is rewritten to stay so inside the contract.
+    Returns `yaml_dict` itself when the schema list holds no reference.
     """
     entries = yaml_dict.get("schema") if isinstance(yaml_dict, dict) else None
     if not isinstance(entries, list) or not any(isinstance(entry, dict) and "$ref" in entry for entry in entries):
@@ -872,22 +886,32 @@ def expand_schema_references(yaml_dict, base_location: str | None):
             engine="datacontract-cli",
         )
 
+    # YAML aliases share one object between places, so each definition is rewritten once
+    rebased_definitions = set()
+
     def rebase_definition_urls(node, file_directory: Path, contract_directory: Path):
         if isinstance(node, list):
             for item in node:
                 rebase_definition_urls(item, file_directory, contract_directory)
         elif isinstance(node, dict):
-            for definition in node.get("authoritativeDefinitions") or []:
+            definitions = node.get("authoritativeDefinitions")
+            for definition in definitions if isinstance(definitions, list) else []:
                 url = definition.get("url") if isinstance(definition, dict) else None
-                if isinstance(url, str) and "://" not in url and _is_local_reference(url):
-                    path_part, hash_, fragment = url.partition("#")
-                    if path_part and not Path(path_part).is_absolute():
-                        rebased = Path(os.path.relpath(file_directory / path_part, contract_directory)).as_posix()
-                        definition["url"] = rebased + hash_ + fragment
+                if not isinstance(url, str) or id(definition) in rebased_definitions:
+                    continue
+                # a one-letter scheme is a Windows drive, which is an absolute path
+                if len(urlparse(url).scheme) > 1 or not _is_local_reference(url):
+                    continue
+                path_part, hash_, fragment = url.partition("#")
+                if path_part and not Path(path_part).is_absolute():
+                    target = (file_directory / path_part).resolve()
+                    definition["url"] = Path(os.path.relpath(target, contract_directory)).as_posix() + hash_ + fragment
+                    rebased_definitions.add(id(definition))
             for value in node.values():
                 rebase_definition_urls(value, file_directory, contract_directory)
 
     schemas = []
+    referenced_names = []
     for entry in entries:
         if not (isinstance(entry, dict) and "$ref" in entry):
             schemas.append(entry)
@@ -896,14 +920,20 @@ def expand_schema_references(yaml_dict, base_location: str | None):
         cannot_resolve = f"Cannot resolve the schema reference '{ref}'"
         if len(entry) > 1 or not isinstance(ref, str):
             raise error(f"{cannot_resolve}: a reference entry holds `$ref: <file or glob>` and nothing else")
+        if "#" in ref:
+            raise error(f"{cannot_resolve}: a schema reference names a file or a glob, without a `#` fragment")
         if base_location is None or "://" in base_location:
             raise error(
                 f"{cannot_resolve}: references resolve relative to the contract file, so pass the contract as a local file"
             )
         contract_file = Path(base_location).resolve()
-        directory = contract_file.parent
-        matches = sorted(glob.glob(ref, root_dir=directory, recursive=True), key=lambda match: Path(match).as_posix())
-        files = [file for file in (directory / match for match in matches) if file.is_file()]
+        # the contract's own directory as written, like the links in `authoritativeDefinitions`
+        directory = Path(base_location).absolute().parent.resolve()
+        if (directory / ref).is_file():
+            files = [directory / ref]
+        else:
+            matches = sorted(glob.glob(ref, root_dir=directory, recursive=True), key=lambda m: Path(m).as_posix())
+            files = [file for file in (directory / match for match in matches) if file.is_file()]
         files = [file for file in files if file.resolve() != contract_file]
         if not files:
             raise error(f"{cannot_resolve}: no file matches it in '{directory}'")
@@ -917,11 +947,12 @@ def expand_schema_references(yaml_dict, base_location: str | None):
                     )
                 rebase_definition_urls(schema, file.parent, directory)
                 schemas.append(schema)
+                referenced_names.append(schema.get("name"))
 
     names = [schema.get("name") for schema in schemas if isinstance(schema, dict)]
-    duplicates = sorted({name for name in names if name is not None and names.count(name) > 1})
+    duplicates = sorted({name for name in referenced_names if isinstance(name, str) and names.count(name) > 1})
     if duplicates:
-        raise error(f"These schemas are defined more than once: {', '.join(map(str, duplicates))}")
+        raise error(f"These schemas are defined more than once: {', '.join(duplicates)}")
     return {**yaml_dict, "schema": schemas}
 
 
