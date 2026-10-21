@@ -104,10 +104,6 @@ Each import page shows a runnable example: a small source file under [`examples/
     <img src="/img/icons/odcs.svg" alt="" />
     <span><span className="doc-card-title">odcs</span><span className="doc-card-desc">An ODCS data contract file.</span></span>
   </a>
-  <a className="doc-card" href="/imports/odcs-bundle">
-    <img src="/img/icons/odcs.svg" alt="" />
-    <span><span className="doc-card-title">odcs-bundle</span><span className="doc-card-desc">A base ODCS file and separate schema files.</span></span>
-  </a>
   <a className="doc-card" href="/imports/openapi">
     <img src="/img/icons/api.svg" alt="" />
     <span><span className="doc-card-title">openapi</span><span className="doc-card-desc">A GET operation of an OpenAPI document.</span></span>

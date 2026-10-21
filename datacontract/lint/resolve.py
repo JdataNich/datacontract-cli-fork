@@ -1,6 +1,8 @@
+import glob
 import importlib.resources as resources
 import json
 import logging
+import os
 import re
 import time
 import typing
@@ -102,7 +104,8 @@ def resolve_data_contract_dict(
 ) -> dict:
     """Resolve a data contract and return it as a dictionary."""
     if data_contract_location is not None:
-        return _to_yaml(read_resource(data_contract_location, config), data_contract_location)
+        yaml_dict = _to_yaml(read_resource(data_contract_location, config), data_contract_location)
+        return expand_schema_references(yaml_dict, data_contract_location)
     elif data_contract_str is not None:
         return _to_yaml(data_contract_str)
     elif data_contract is not None:
@@ -420,7 +423,7 @@ def _load_local_contract(
         raise _local_resolution_error(url, f"the file '{key}' does not exist")
 
     try:
-        contract = _resolve_data_contract_from_str(read_resource(key, config))[0]
+        contract = _resolve_data_contract_from_str(read_resource(key, config), base_location=key)[0]
     except DataContractException as e:
         raise _local_resolution_error(url, f"'{key}' is not a valid data contract: {e.reason}", original_exception=e)
 
@@ -777,6 +780,7 @@ def _resolve_data_contract_from_str(
 
     if is_open_data_contract_standard(yaml_dict):
         logger.info("Importing ODCS v3")
+        yaml_dict = expand_schema_references(yaml_dict, base_location)
         # When a custom JSON schema is provided, treat it as the source of
         # truth and accept extra top-level fields the standard ODCS Pydantic
         # class would reject.
@@ -846,6 +850,79 @@ def _resolve_data_contract_from_str(
             )
         ],
     )
+
+
+def expand_schema_references(yaml_dict, base_location: str | None):
+    """Replace each `$ref: <file or glob>` entry of the top-level `schema` list with the schema objects
+    in the files it matches, in path order. The glob is relative to the contract file, may use `**`,
+    and never matches the contract itself. A matched file holds one schema object or a list of them,
+    and cannot reference further files, so references cannot form a cycle. A relative file link in its
+    `authoritativeDefinitions` is relative to that file, and is rewritten to stay so inside the contract.
+    """
+    entries = yaml_dict.get("schema") if isinstance(yaml_dict, dict) else None
+    if not isinstance(entries, list) or not any(isinstance(entry, dict) and "$ref" in entry for entry in entries):
+        return yaml_dict
+
+    def error(reason: str) -> DataContractException:
+        return DataContractException(
+            type="lint",
+            result=ResultEnum.failed,
+            name="Resolve schema references",
+            reason=reason,
+            engine="datacontract-cli",
+        )
+
+    def rebase_definition_urls(node, file_directory: Path, contract_directory: Path):
+        if isinstance(node, list):
+            for item in node:
+                rebase_definition_urls(item, file_directory, contract_directory)
+        elif isinstance(node, dict):
+            for definition in node.get("authoritativeDefinitions") or []:
+                url = definition.get("url") if isinstance(definition, dict) else None
+                if isinstance(url, str) and "://" not in url and _is_local_reference(url):
+                    path_part, hash_, fragment = url.partition("#")
+                    if path_part and not Path(path_part).is_absolute():
+                        rebased = Path(os.path.relpath(file_directory / path_part, contract_directory)).as_posix()
+                        definition["url"] = rebased + hash_ + fragment
+            for value in node.values():
+                rebase_definition_urls(value, file_directory, contract_directory)
+
+    schemas = []
+    for entry in entries:
+        if not (isinstance(entry, dict) and "$ref" in entry):
+            schemas.append(entry)
+            continue
+        ref = entry["$ref"]
+        cannot_resolve = f"Cannot resolve the schema reference '{ref}'"
+        if len(entry) > 1 or not isinstance(ref, str):
+            raise error(f"{cannot_resolve}: a reference entry holds `$ref: <file or glob>` and nothing else")
+        if base_location is None or "://" in base_location:
+            raise error(
+                f"{cannot_resolve}: references resolve relative to the contract file, so pass the contract as a local file"
+            )
+        contract_file = Path(base_location).resolve()
+        directory = contract_file.parent
+        matches = sorted(glob.glob(ref, root_dir=directory, recursive=True), key=lambda match: Path(match).as_posix())
+        files = [file for file in (directory / match for match in matches) if file.is_file()]
+        files = [file for file in files if file.resolve() != contract_file]
+        if not files:
+            raise error(f"{cannot_resolve}: no file matches it in '{directory}'")
+        for file in files:
+            content = _to_yaml(read_resource(str(file)), str(file))
+            for schema in content if isinstance(content, list) else [content]:
+                if not isinstance(schema, dict) or "$ref" in schema or is_open_data_contract_standard(schema):
+                    raise error(
+                        f"{cannot_resolve}: '{file}' must hold a schema object or a list of them, "
+                        "not a contract or a `$ref`"
+                    )
+                rebase_definition_urls(schema, file.parent, directory)
+                schemas.append(schema)
+
+    names = [schema.get("name") for schema in schemas if isinstance(schema, dict)]
+    duplicates = sorted({name for name in names if name is not None and names.count(name) > 1})
+    if duplicates:
+        raise error(f"These schemas are defined more than once: {', '.join(map(str, duplicates))}")
+    return {**yaml_dict, "schema": schemas}
 
 
 def _initial_visited(base_location: str | None) -> frozenset[str]:

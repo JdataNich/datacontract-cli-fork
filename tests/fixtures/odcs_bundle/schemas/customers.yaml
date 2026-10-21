@@ -1,8 +1,0 @@
-- name: customers
-  properties:
-    - name: customer_id
-      logicalType: string
-- name: addresses
-  properties:
-    - name: address_id
-      logicalType: string

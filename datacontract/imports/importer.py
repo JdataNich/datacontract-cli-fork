@@ -40,7 +40,6 @@ class ImportFormat(str, Enum):
     json = "json"
     bigquery = "bigquery"
     odcs = "odcs"
-    odcs_bundle = "odcs-bundle"
     odata = "odata"
     openapi = "openapi"
     unity = "unity"
